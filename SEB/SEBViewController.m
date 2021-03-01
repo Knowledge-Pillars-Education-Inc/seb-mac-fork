@@ -2522,74 +2522,77 @@ void run_on_ui_thread(dispatch_block_t block)
 }
 
 
-- (void) storeNewSEBSettingsSuccessful:(NSError *)error
+- (void) storeNewSEBSettingsSuccessful: (NSError *)error
 {
-    DDLogDebug(@"%s: Storing new SEB settings was %@successful", __FUNCTION__, error ? @"not " : @"");
-    if (!error) {
-        // If decrypting new settings was successfull
-        _scannedQRCode = NO;
-        [[NSUserDefaults standardUserDefaults] setSecureString:startURLQueryParameter forKey:@"org_safeexambrowser_startURLQueryParameter"];
-        // If we got a valid filename from the opened config file
-        // we save this for displaing in InAppSettings
-        NSString *newSettingsFilename = [[MyGlobals sharedMyGlobals] currentConfigURL].lastPathComponent.stringByDeletingPathExtension;
-        if (newSettingsFilename.length > 0) {
-            [[NSUserDefaults standardUserDefaults] setSecureString:newSettingsFilename forKey:@"configFileName"];
-        }
-        _isReconfiguringToMDMConfig = NO;
-        _didReceiveMDMConfig = NO;
-        [self restartExam:false];
-        
-    } else {
-        
-        // If decrypting new settings wasn't successfull, we have to restore the path to the old settings
-        [[MyGlobals sharedMyGlobals] setCurrentConfigURL:currentConfigPath];
-        
-        // When reconfiguring from MDM config fails, the SEB session needs to be restarted
-        if (_isReconfiguringToMDMConfig) {
-            DDLogError(@"%s: Reconfiguring from MDM config failed, restarting SEB session.", __FUNCTION__);
-            _isReconfiguringToMDMConfig = NO;
-            _didReceiveMDMConfig = NO;
-            [self restartExam:NO];
-            
-        } else if (_scannedQRCode) {
-            DDLogError(@"%s: Reconfiguring from QR code config failed!", __FUNCTION__);
-            _scannedQRCode = false;
-            if (error.code == SEBErrorNoValidConfigData) {
-                error = [NSError errorWithDomain:sebErrorDomain
-                                            code:SEBErrorNoValidConfigData
-                                        userInfo:@{NSLocalizedDescriptionKey : NSLocalizedString(@"Scanning Config QR Code Failed", nil),
-                                                   NSLocalizedFailureReasonErrorKey : [NSString stringWithFormat:NSLocalizedString(@"No valid %@ config found.", nil), SEBShortAppName],
-                                                   NSUnderlyingErrorKey : error}];
+    run_on_ui_thread(^{
+        DDLogDebug(@"%s: Storing new SEB settings was %@successful", __FUNCTION__, error ? @"not " : @"");
+        if (!error) {
+            // If decrypting new settings was successfull
+            self.scannedQRCode = NO;
+            [[NSUserDefaults standardUserDefaults] setSecureString:self->startURLQueryParameter forKey:@"org_safeexambrowser_startURLQueryParameter"];
+            // If we got a valid filename from the opened config file
+            // we save this for displaing in InAppSettings
+            NSString *newSettingsFilename = [[MyGlobals sharedMyGlobals] currentConfigURL].lastPathComponent.stringByDeletingPathExtension;
+            if (newSettingsFilename.length > 0) {
+                [[NSUserDefaults standardUserDefaults] setSecureString:newSettingsFilename forKey:@"configFileName"];
             }
-            if (_alertController) {
-                [_alertController dismissViewControllerAnimated:NO completion:nil];
-            }
-            NSString *alertMessage = error.localizedRecoverySuggestion;
-            alertMessage = [NSString stringWithFormat:@"%@%@%@", alertMessage ? alertMessage : @"", alertMessage ? @"\n" : @"", error.localizedFailureReason];
-            _alertController = [UIAlertController alertControllerWithTitle:error.localizedDescription
-                                                                       message:alertMessage
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-            [_alertController addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil)
-                                                                     style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                                                                         self->_alertController = nil;
-                                                                         if (!self->_finishedStartingUp) {
-                                                                             // Continue starting up SEB without resetting settings
-                                                                             [self conditionallyStartKioskMode];
-                                                                         }
-                                                                     }]];
+            self.isReconfiguringToMDMConfig = NO;
+            self.didReceiveMDMConfig = NO;
+            [self restartExam:false];
             
-            [self.topMostController presentViewController:_alertController animated:NO completion:nil];
-
-        } else if (!_finishedStartingUp || _pausedSAMAlertDisplayed) {
-            _pausedSAMAlertDisplayed = false;
-            // Continue starting up SEB without resetting settings
-            // but user interface might need to be re-initialized
-            [self initSEB];
-            [self conditionallyStartKioskMode];
         } else {
-            [self showAlertWithError:error];
+            
+            NSError *newError = error;
+            // If decrypting new settings wasn't successfull, we have to restore the path to the old settings
+            [[MyGlobals sharedMyGlobals] setCurrentConfigURL:self->currentConfigPath];
+            
+            // When reconfiguring from MDM config fails, the SEB session needs to be restarted
+            if (self.isReconfiguringToMDMConfig) {
+                DDLogError(@"%s: Reconfiguring from MDM config failed, restarting SEB session.", __FUNCTION__);
+                self.isReconfiguringToMDMConfig = NO;
+                self.didReceiveMDMConfig = NO;
+                [self restartExam:NO];
+                
+            } else if (self.scannedQRCode) {
+                DDLogError(@"%s: Reconfiguring from QR code config failed!", __FUNCTION__);
+                self.scannedQRCode = false;
+                if (newError.code == SEBErrorNoValidConfigData) {
+                    newError = [NSError errorWithDomain:sebErrorDomain
+                                                code:SEBErrorNoValidConfigData
+                                            userInfo:@{NSLocalizedDescriptionKey : NSLocalizedString(@"Scanning Config QR Code Failed", nil),
+                                                       NSLocalizedFailureReasonErrorKey : [NSString stringWithFormat:NSLocalizedString(@"No valid %@ config found.", nil), SEBShortAppName],
+                                                       NSUnderlyingErrorKey : newError}];
+                }
+                if (self.alertController) {
+                    [self.alertController dismissViewControllerAnimated:NO completion:nil];
+                }
+                NSString *alertMessage = newError.localizedRecoverySuggestion;
+                alertMessage = [NSString stringWithFormat:@"%@%@%@", alertMessage ? alertMessage : @"", alertMessage ? @"\n" : @"", newError.localizedFailureReason];
+                self.alertController = [UIAlertController alertControllerWithTitle:newError.localizedDescription
+                                                                           message:alertMessage
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                [self.alertController addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil)
+                                                                         style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                                                                             self.alertController = nil;
+                                                                             if (!self.finishedStartingUp) {
+                                                                                 // Continue starting up SEB without resetting settings
+                                                                                 [self conditionallyStartKioskMode];
+                                                                             }
+                                                                         }]];
+                
+                [self.topMostController presentViewController:self.alertController animated:NO completion:nil];
+
+            } else if (!self.finishedStartingUp || self.pausedSAMAlertDisplayed) {
+                self.pausedSAMAlertDisplayed = false;
+                // Continue starting up SEB without resetting settings
+                // but user interface might need to be re-initialized
+                [self initSEB];
+                [self conditionallyStartKioskMode];
+            } else {
+                [self showAlertWithError:newError];
+            }
         }
-    }
+    });
 }
 
 
